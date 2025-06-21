@@ -1,2 +1,5 @@
 Flask
-gunicorn
+pyautogui 
+pyperclip 
+pillow 
+pywin32 
