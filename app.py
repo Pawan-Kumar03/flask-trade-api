@@ -3,6 +3,10 @@ import uuid
 import os
 import base64
 import time
+import subprocess
+import pyperclip
+from PIL import Image
+import platform
 
 app = Flask(__name__)
 
@@ -14,6 +18,64 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 latest_prompt = None
 latest_prompt_id = None
 latest_trade_response = None  # Stores response from CustomGPT
+
+CUSTOM_GPT_URL = "https://chatgpt.com/g/g-6844f47a0c248191bea996aaea36e080-ninjatrading-automation"
+
+def copy_image_to_clipboard_mac(image_path):
+    subprocess.run([
+        "osascript", "-e",
+        f'''set the clipboard to (read (POSIX file "{os.path.abspath(image_path)}") as JPEG picture)'''
+    ])
+
+def send_to_custom_gpt(prompt_text, image_path):
+    print("\U0001F310 Opening Custom GPT in Chrome...")
+    subprocess.run(["osascript", "-e", f'''
+    tell application "Google Chrome"
+        if not (exists window 1) then make new window
+        set URL of active tab of window 1 to "{CUSTOM_GPT_URL}"
+        activate
+    end tell
+    '''])
+
+    # Wait for the page to load
+    time.sleep(8)
+
+    # Copy and paste prompt first
+    pyperclip.copy(prompt_text)
+    print("\U0001F680 Sending prompt...")
+    subprocess.run(["osascript", "-e", '''
+    tell application "System Events"
+        keystroke "v" using {command down}
+        delay 0.5
+    end tell
+    '''])
+
+    time.sleep(1)
+
+    # Copy image to clipboard (macOS only)
+    print("🖼️ Copying image to clipboard and pasting...")
+    if platform.system() == "Darwin":
+        copy_image_to_clipboard_mac(image_path)
+        time.sleep(1)
+        subprocess.run(["osascript", "-e", '''
+        tell application "System Events"
+            keystroke "v" using {command down}
+        end tell
+        '''])
+
+        # Wait for image upload to complete (approx. 5 sec, tune as needed)
+        print("⏳ Waiting for image upload...")
+        time.sleep(5)
+
+        # Then hit return key to send both prompt and image
+        subprocess.run(["osascript", "-e", '''
+        tell application "System Events"
+            key code 36  -- return key
+        end tell
+        '''])
+    else:
+        print("❌ Image clipboard paste not supported on this OS")
+
 
 @app.route("/trade_signal", methods=["POST"])
 def receive_trade_signal():
@@ -39,23 +101,27 @@ def receive_trade_signal():
         with open(image_path, "wb") as f:
             f.write(base64.b64decode(chart_base64))
 
-    # Prepare prompt
+    # Prepare enhanced prompt
     latest_prompt_id = str(uuid.uuid4())
-    latest_prompt = {
-        "id": latest_prompt_id,
-        "text": f"""Trade Signal Data:
+    prompt_text = f"""Please analyse market through chart image and market data, and generate trade signals:
+Trade Signal Data:
 - Price: {price}
 - Volume: {volume}
 - VWAP: {vwap}
-- Macro: {macro}
-- Chart Image Path: {image_path if image_path else "No image provided"}"""
+- Macro: {macro}"""
+
+    latest_prompt = {
+        "id": latest_prompt_id,
+        "text": prompt_text
     }
     latest_trade_response = None  # Clear previous result
 
     print("\n📤 [PROMPT FOR GPT]")
-    print(latest_prompt["text"])
+    print(prompt_text)
 
-    # ⏳ Wait for GPT to respond
+    # 🔄 Trigger CustomGPT automation
+    send_to_custom_gpt(prompt_text, image_path)
+
     print("\n🕒 [WAITING FOR CUSTOMGPT TO RESPOND WITH SIGNAL]")
 
     wait_time = 30  # seconds
